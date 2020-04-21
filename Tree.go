@@ -1,16 +1,22 @@
+/*
+BIG QUESTIONS:
+- Implement interface metods using pointers or references?
+ */
+
 package models
 
 import (
+    "errors"
     "fmt"
-    "sync"
+    "math"
     "math/rand"
+    "reflect"
+    "sync"
+    "time"
 )
 
 type Tree interface {
-    Print()
-    Traverse(int) []int
-    Equals(Tree) bool
-    Identical(Tree) bool
+    Traverse(int) <-chan int
 }
 
 type TreeGenParams interface {
@@ -18,27 +24,25 @@ type TreeGenParams interface {
 }
 
 type TreeInfo interface {
-    printTreeInfo() error
+    printTreeInfo()
 }
 
 // Define structs and basic functionality
 
 type NTree struct {
-    Value int
-    children Children
+    Value *int
+    children []*NTree
     size int
 }
-type Children = []Ntree
 
-type nTreeGenParams struct {
-    r *Rand
-    Balanced bool
+type NTreeGenParams struct {
+    r *rand.Rand
     MaxChild int
     PossibleValues []int
 }
 
-func NewNTreeGenParams(r *Rand, maxChild int, possibleValues ...int) TreeGenParams {
-    return nTreeGenParams{
+func NewNTreeGenParams(r *rand.Rand, maxChild int, possibleValues ...int) TreeGenParams {
+    return &NTreeGenParams{
         r: r,
         MaxChild: maxChild,
         PossibleValues: possibleValues,
@@ -56,20 +60,20 @@ type nTreeInfo struct {
 }
 
 type BSTree struct {
-    Value int
-    Right Tree
-    Left Tree
+    Value *int
+    Right *BSTree
+    Left *BSTree
     size int
 }
 
-type bSTreeGenParams struct {
-    r *Rand
+type BSTreeGenParams struct {
+    r *rand.Rand
     ChildProb float64
     PossibleValues []int
 }
 
-func NewBSTreeGenParams(r *Rand, childProb int, possibleValues ...int) TreeGenParams {
-    return bSTreeGenParams{
+func NewBSTreeGenParams(r *rand.Rand, childProb float64, possibleValues ...int) TreeGenParams {
+    return &BSTreeGenParams{
         r: r,
         ChildProb: childProb,
         PossibleValues: possibleValues,
@@ -96,44 +100,67 @@ func (tree *BSTree) Print() {
     fmt.Println("TO BE IMPLEMENTED")
 }
 
-func PrintTreeInfo(info treeInfo) {
-    info.printTreeInfo()
+func (info *nTreeInfo) printTreeInfo() {
+    fmt.Println("TO BE IMPLEMENTED")
 }
 
-func (info *nTreeInfo) printTreeInfo() (err error) {
-
-}
-
-func (info *bSTreeInfo) printTreeInfo() (err error) {
-
+func (info *bsTreeInfo) printTreeInfo() {
+    fmt.Println("TO BE IMPLEMENTED")
 }
 
 // Traversing functions
 
 // Traverse Binary Search Tree in selected mode
 
+type Order = int
+const (
+    ordered int = 0
+    unordered int = 1
+)
 const (
     preorder int = -1
     inorder int = 0
     postorder int = 1
 )
 
-func (tree *NTree) Traverse(mode int) []int {
+func (tree *NTree) Traverse(mode Order) <-chan int {
+
+    var tFunc func(*NTree, chan<- int)
+
     switch mode {
-    case preorder:
-    case inorder:
-    case postorder:
+    case ordered:
+        tFunc = orderedT
+    case unordered:
+        tFunc = unorderedT
     default:
+        errors.New("Option not available")
     }
+
+    ch := make(chan int, tree.size)
+    go tFunc(tree, ch)
+
+    return ch
 }
 
-func (tree *BSTree) Traverse(mode int) []int {
+func (tree *BSTree) Traverse(mode Order) <-chan int {
+
+    var tFunc func(*BSTree, chan<- int)
+
     switch mode {
     case preorder:
+        tFunc = preorderT
     case inorder:
+        tFunc = inorderT
     case postorder:
+        tFunc = postorderT
     default:
+        errors.New("Order not available")
     }
+
+    ch := make(chan int, tree.size)
+    go tFunc(tree, ch)
+
+    return ch
 }
 
 // Equality functions
@@ -144,34 +171,47 @@ func (tree0 *NTree) Equals(tree1 *NTree) bool {
     // in one tree are present in the other and do not take hierarchy into
     // consideration
 
+    if tree0.size != tree1.size {
+        return false
+    }
+
+    mapT0 := make(map[int] int)
+    mapT1 := make(map[int] int)
+
+    chT0 := make(chan int, tree0.size)
+    chT1 := make(chan int, tree1.size)
+
+    go unorderedT(tree0, chT0)
+    go unorderedT(tree1, chT1)
+
+    var wg sync.WaitGroup
+    wg.Add(2)
+
+    go addToMap(chT0, mapT0, &wg)
+    go addToMap(chT1, mapT1, &wg)
+
+    wg.Wait()
+
+    return reflect.DeepEqual(mapT0, mapT1)
+}
+
+func addToMap(ch <-chan int, m map[int] int, wg *sync.WaitGroup) {
+
+   defer wg.Done()
+
+   for val := range ch {
+        if _, ok := m[val]; ok {
+            m[val]++
+        } else {
+            m[val] = 0
+        }
+   }
+
 }
 
 func (tree0 *NTree) Identical(tree1 *NTree) bool {
 
     // This ordered traversal ensures identical structures and values
-    return compareTrees(tree0, tree1, orderedT)
-
-}
-
-func (tree0 *BSTree) Equals(tree1 *BSTree) bool {
-
-    // inorder traversal is blind to the tree's structure and only care about
-    // the order of values
-    return compareTrees(tree0, tree1, inorderT)
-
-}
-
-func (tree0 *BSTree) Identical(tree1 *BSTree) bool {
-
-    // preorder traversal takes exact structure and value order into account
-    // for its comparisson and is more efficient than postorder traversals 
-    // to spot early deviations 
-    return compareTrees(tree0, tree1, preorderT)
-
-}
-
-func compareTrees(tree0, tree1 Tree, traversalFunc func(Tree, chan<- int)) bool {
-
     if tree0.size != tree1.size {
         return false
     }
@@ -179,9 +219,49 @@ func compareTrees(tree0, tree1 Tree, traversalFunc func(Tree, chan<- int)) bool 
     chT0 := make(chan int, tree0.size)
     chT1 := make(chan int, tree1.size)
 
-    go traversalFunc(tree0, chT0)
-    go traversalFunc(tree1, chT1)
+    go orderedT(tree0, chT0)
+    go orderedT(tree1, chT1)
 
+    return compareTrees(chT0, chT1)
+
+}
+
+func (tree0 *BSTree) Equals(tree1 *BSTree) bool {
+
+    // inorder traversal is blind to the tree's structure and only care about
+    // the order of values
+    if tree0.size != tree1.size {
+        return false
+    }
+
+    chT0 := make(chan int, tree0.size)
+    chT1 := make(chan int, tree1.size)
+
+    go inorderT(tree0, chT0)
+    go inorderT(tree1, chT1)
+
+    return compareTrees(chT0, chT1)
+}
+
+func (tree0 *BSTree) Identical(tree1 *BSTree) bool {
+
+    // preorder traversal takes exact structure and value order into account
+    // for its comparisson and is more efficient than postorder traversals 
+    // to spot early deviations 
+    if tree0.size != tree1.size {
+        return false
+    }
+
+    chT0 := make(chan int, tree0.size)
+    chT1 := make(chan int, tree1.size)
+
+    go preorderT(tree0, chT0)
+    go preorderT(tree1, chT1)
+
+    return compareTrees(chT0, chT1)
+}
+
+func compareTrees(chT0, chT1 <-chan int) bool {
     for {
         select {
         case val0, ok := <-chT0:
@@ -200,99 +280,322 @@ func compareTrees(tree0, tree1 Tree, traversalFunc func(Tree, chan<- int)) bool 
             } else if val0, ok := <-chT0; !ok || val1 != val0 {
                 return false
             }
-        }
-
-        if chT0 == nil && chT1 == nil {
-            break
+        default:
+            if chT0 == nil && chT1 == nil {
+                return true
+            }
         }
     }
+}
 
-    return true
+// Info functions
+
+type uniqueCounter struct {
+    v map[int] int
+    mux sync.Mutex
+}
+
+func (unique *uniqueCounter) Add(val int) {
+
+    defer unique.mux.Unlock()
+
+    unique.mux.Lock()
+    if _, ok := unique.v[val]; !ok {
+        unique.v[val] = 1
+    }
+}
+
+func (unique *uniqueCounter) toArray() []int {
+    var ret []int
+    for key := range unique.v {
+        ret = append(ret, key)
+    }
+    return ret
+}
+
+func (tree *NTree) getInfo() nTreeInfo {
+
+    unique := &uniqueCounter{
+        v: make(map[int] int),
+    }
+    ch := make(chan nTreeInfo)
+
+    go nTreeInfoHelper(tree, unique, ch)
+
+    info := <-ch
+    close(ch)
+
+    info.uniqueValues = unique.toArray()
+
+    return info
+}
+
+func nTreeInfoHelper(tree *NTree, unique *uniqueCounter, ch chan nTreeInfo) {
+
+    if tree.size == 0 {
+        ch<- nTreeInfo{
+            maxChild: 0,
+            uniqueValues: nil,
+            maxDepth: 0,
+        }
+    } else if tree.size == 1 {
+        unique.Add(*tree.Value)
+        ch<- nTreeInfo{
+            maxChild: 0,
+            uniqueValues: nil,
+            maxDepth: 1,
+        }
+    } else {
+
+        info := nTreeInfo{
+            maxChild: len(tree.children),
+            uniqueValues: nil,
+            maxDepth: 0,
+        }
+
+        chChild := make(chan nTreeInfo)
+
+        for _, child := range tree.children {
+            go nTreeInfoHelper(child, unique, chChild)
+        }
+
+        for i := 0; i < len(tree.children); i++ {
+            chInfo := <-chChild
+            if chInfo.maxChild > info.maxChild {
+                info.maxChild = chInfo.maxChild
+            }
+            if chInfo.maxDepth > info.maxDepth {
+                info.maxDepth = chInfo.maxDepth
+            }
+        }
+        close(chChild)
+
+        unique.Add(*tree.Value)
+        info.maxDepth++
+
+        ch<- info
+
+    }
+
+}
+
+func (tree *BSTree) getInfo() bsTreeInfo {
+
+    unique := &uniqueCounter{
+        v: make(map[int] int),
+    }
+    ch := make(chan int)
+
+    go bsTreeInfoHelper(tree, unique, ch)
+
+    info := bsTreeInfo{
+        avgNChild: nil,
+        uniqueValues: unique.toArray(),
+        maxDepth: <-ch,
+    }
+
+    // size of current tree divided by the maximum size possible for a root
+    // with this depth
+    info.avgNChild = float64(tree.size) / (math.Pow(2, float64(info.maxDepth)) - 1)
+
+    return info
+}
+
+func bsTreeInfoHelper(tree *BSTree, unique *uniqueCounter, ch chan int) {
+
+    defer func(ch chan int) {
+        close(ch)
+    }(ch)
+
+    if tree.Value == nil {
+        ch<- 0
+    } else {
+        ret := 0
+
+        chLeft := make(chan int)
+        chRight := make(chan int)
+
+        go bsTreeInfoHelper(tree.Left, unique, chLeft)
+        go bsTreeInfoHelper(tree.Right, unique, chRight)
+
+        if val := <-chLeft; ret < val {
+                ret = val
+        }
+        if val := <-chRight; ret < val {
+                ret = val
+        }
+
+        unique.Add(*tree.Value)
+        ch<- ret + 1
+    }
 }
 
 // Generate functions
 
-// These imply that trees are also parameters for generating bootstrapped 
+// These imply that trees are also parameters for generating resampled 
 // versions of themselves
 
 func (params *NTreeGenParams) Generate(maxDepth int) Tree {
-
+    /* NTreeGenParams
+    r *Rand
+    MaxChild int
+    PossibleValues []int
+    */
+    ch := make(chan *NTree)
+    go nTreeGenHelper(params, maxDepth, ch)
+    return <-ch
 }
 
-func (tree *NTree) GetParams(maxDepth int) NTreeGenParams {
+func nTreeGenHelper(params *NTreeGenParams, maxDepth int, ch chan *NTree) {
 
+    tree := &NTree{
+        Value:nil,
+        children:nil,
+        size:0,
+    }
+
+    defer func(tree *NTree, ch chan *NTree) {
+        ch<- tree
+    }(tree, ch)
+
+    if maxDepth >= 1 {
+        tree.Value = &params.PossibleValues[params.r.Intn(len(params.PossibleValues))]
+        var children []*NTree
+        tree.children = children
+        tree.size = 1
+    }
+    if maxDepth > 1 {
+
+        nChild := params.r.Intn(params.MaxChild)
+
+        chChild := make(chan *NTree)
+        defer close(chChild)
+
+        for i := 0; i < nChild; i++ {
+            go nTreeGenHelper(params, maxDepth-1, chChild)
+        }
+
+        for i := 0; i < nChild; i++ {
+            child := <-chChild
+            tree.size += child.size
+            tree.children = append(tree.children, child)
+        }
+    }
+}
+
+func (tree *NTree) GetParams() NTreeGenParams {
+
+    info := tree.getInfo()
+    return NTreeGenParams{
+        r: rand.New(rand.NewSource(time.Now().UnixNano())),
+        MaxChild: info.maxChild,
+        PossibleValues: info.uniqueValues,
+    }
 }
 
 func (params *BSTreeGenParams) Generate(maxDepth int) Tree {
-
+    /*
+    r *Rand
+    ChildProb float64
+    PossibleValues []int
+    */
+    ch := make(chan *BSTree)
+    go bsTreeGenHelper(params, maxDepth, ch)
+    return <-ch
 }
 
-func (tree *NTree) GetParams(maxDepth int) BSTreeGenParams {
+func bsTreeGenHelper(params *BSTreeGenParams, maxDepth int, ch chan *BSTree) {
 
+        tree := &BSTree{
+            Value:nil,
+            Right:nil,
+            Left:nil,
+            size:0,
+        }
+
+        defer func(tree *BSTree, ch chan *BSTree) {
+            ch<- tree
+            close(ch)
+        }(tree, ch)
+
+        if maxDepth >= 1 {
+            tree.Value = &params.PossibleValues[params.r.Intn(len(params.PossibleValues))]
+            tree.size = 1
+        }
+        if maxDepth > 1 {
+
+            chRight := make(chan *BSTree)
+            chLeft := make(chan *BSTree)
+
+            if params.r.Float64() < params.ChildProb {
+                go bsTreeGenHelper(params, maxDepth-1, chRight)
+            } else {
+                go bsTreeGenHelper(params, 0, chRight)
+            }
+
+            if params.r.Float64() < params.ChildProb {
+                go bsTreeGenHelper(params, maxDepth-1, chLeft)
+            } else {
+                go bsTreeGenHelper(params, 0, chLeft)
+            }
+
+            tree.Right = <-chRight
+            tree.Left = <-chLeft
+
+            tree.size += (tree.Right.size + tree.Left.size)
+        }
+}
+
+func (tree *BSTree) GetParams() BSTreeGenParams {
+    info := tree.getInfo()
+    return BSTreeGenParams{
+        r: rand.New(rand.NewSource(time.Now().UnixNano())),
+        ChildProb: info.avgNChild,
+        PossibleValues: info.uniqueValues,
+    }
 }
 
 // Helper functions
 
-func getTreeInfo(tree *Tree) (treeInfo, error) {
-
-    switch tree.(type) {
-
-    }
-
-}
-
 func orderedT(tree *NTree, ch chan<- int) {
 
-    defer func(ch chan<- int) {
-        close(ch)
-    }(ch)
-
-    if tree.size == 1 {
-        ch<- tree.Value
-    } else if tree.size >= 2 {
+    if tree.size >= 1 {
+        ch<- *tree.Value
+    }
+    if tree.size > 1 {
 
         var chChildren []chan int
 
         for i, child := range tree.children {
-            chChildren.append(make(chan int, child.size))
+            chChildren = append(chChildren, make(chan int, child.size))
             go orderedT(child, chChildren[i])
         }
 
-        ch<- tree.Value
-        for _, chChannel := range chChildren {
-            for val := range chChannel {
-                ch<- val
+        for i, chChannel := range chChildren {
+            for j := 0; j < tree.children[i].size; j++ {
+                ch<- <-chChannel
             }
+            close(chChannel)
         }
 
     }
 
 }
 
-func unorderedT(tree *Ntree, wg *sync.WaitGroup, ch chan<- int) {
+func unorderedT(tree *NTree, ch chan<- int) {
 
-    defer wg.Done()
-
-    switch size := tree.size; {
-    case size >= 1:
-        ch<- tree.Value
-        fallthrough
-    case size >= 2:
-        for _, child := range tree.children {
-            wg.Add(1)
-            go unorderedT(child, wg, ch)
-        }
-
+    if tree.size >= 1 {
+        ch<- *tree.Value
     }
-
+    if tree.size > 1 {
+        for _, child := range tree.children {
+            go unorderedT(child, ch)
+        }
+    }
 }
 
 func inorderT(tree *BSTree, ch chan<- int) {
 
-    defer func(ch chan int) {
-        close(ch)
-    }(ch)
-
     if tree.Value == nil {
         return
     }
@@ -303,23 +606,21 @@ func inorderT(tree *BSTree, ch chan<- int) {
     go inorderT(tree.Left, chLeft)
     go inorderT(tree.Right, chRight)
 
-    for val := range chLeft {
-        ch<- val
+    for i := 0; i < tree.Left.size; i++ {
+        ch<- <-chLeft
     }
+    close(chLeft)
 
-    ch<- tree.Value
+    ch<- *tree.Value
 
-    for val := range chRight {
-        ch<- val
+    for i := 0; i < tree.Right.size; i++ {
+        ch<- <-chRight
     }
+    close(chRight)
 }
 
 func preorderT(tree *BSTree, ch chan<- int) {
 
-    defer func(ch chan int) {
-        close(ch)
-    }(ch)
-
     if tree.Value == nil {
         return
     }
@@ -330,21 +631,19 @@ func preorderT(tree *BSTree, ch chan<- int) {
     go inorderT(tree.Left, chLeft)
     go inorderT(tree.Right, chRight)
 
-    ch<- tree.Value
-    for val := range chLeft {
-        ch<- val
+    ch<- *tree.Value
+    for i := 0; i < tree.Left.size; i++ {
+        ch<- <-chLeft
     }
-    for val := range chRight {
-        ch<- val
+    close(chLeft)
+    for i := 0; i < tree.Right.size; i++ {
+        ch<- <-chRight
     }
+    close(chRight)
 }
 
 func postorderT(tree *BSTree, ch chan<- int) {
 
-    defer func(ch chan int) {
-        close(ch)
-    }(ch)
-
     if tree.Value == nil {
         return
     }
@@ -355,13 +654,14 @@ func postorderT(tree *BSTree, ch chan<- int) {
     go inorderT(tree.Left, chLeft)
     go inorderT(tree.Right, chRight)
 
-    for val := range chLeft {
-        ch<- val
+    for i := 0; i < tree.Left.size; i++ {
+        ch<- <-chLeft
     }
-    for val := range chRight {
-        ch<- val
+    close(chLeft)
+    for i := 0; i < tree.Right.size; i++ {
+        ch<- <-chRight
     }
-    ch<- tree.Value
+    close(chRight)
+    ch<- *tree.Value
 
 }
-
