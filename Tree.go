@@ -35,6 +35,10 @@ type NTree struct {
     size int
 }
 
+func (tree NTree) GetChildren() []*NTree {
+    return tree.children
+}
+
 type NTreeGenParams struct {
     r *rand.Rand
     MaxChild int
@@ -56,7 +60,7 @@ func NewDefaultNTreeGenParams() TreeGenParams {
 type nTreeInfo struct {
     maxChild int
     uniqueValues []int
-    maxDepth int
+    depth int
 }
 
 type BSTree struct {
@@ -87,17 +91,60 @@ func NewDefaultBSTreeGenParams() TreeGenParams {
 type bsTreeInfo struct {
     avgNChild float64
     uniqueValues []int
-    maxDepth int
+    depth int
 }
 
 // Printing functions
 
 func (tree *NTree) Print() {
-    fmt.Println("TO BE IMPLEMENTED")
+    prefix := "-"
+    if tree.size == 1 {
+        nTreePrintHelper(tree, &prefix, true)
+    } else if tree.size > 1 {
+        nTreePrintHelper(tree, &prefix, false)
+    }
+}
+
+func nTreePrintHelper(node *NTree, prefix *string, last bool) {
+	if node.Value != nil {
+        fmt.Print(*prefix)
+        if last {
+            fmt.Print("`-")
+            *prefix += "   "
+        } else {
+            fmt.Print("|-")
+            *prefix += "|  "
+        }
+        fmt.Print(node.Value)
+        for i, child := range node.children {
+            last := i == len(node.children)
+            nTreePrintHelper(child, prefix, last)
+        }
+    }
 }
 
 func (tree *BSTree) Print() {
-    fmt.Println("TO BE IMPLEMENTED")
+    prefix := "-"
+    if tree.size == 1 {
+        bsTreePrintHelper(tree, &prefix, true)
+    } else if tree.size > 1 {
+        bsTreePrintHelper(tree, &prefix, false)
+    }
+}
+func bsTreePrintHelper(node *BSTree, prefix *string, last bool) {
+    if node.Value != nil {
+        fmt.Print(*prefix)
+        if last {
+            fmt.Print("`-")
+            *prefix += "   "
+        } else {
+            fmt.Print("|-")
+            *prefix += "|  "
+        }
+        fmt.Print(node.Value)
+        bsTreePrintHelper(node.Right, prefix, false)
+        bsTreePrintHelper(node.Right, prefix, true)
+    }
 }
 
 func (info *nTreeInfo) printTreeInfo() {
@@ -336,21 +383,21 @@ func nTreeInfoHelper(tree *NTree, unique *uniqueCounter, ch chan nTreeInfo) {
         ch<- nTreeInfo{
             maxChild: 0,
             uniqueValues: nil,
-            maxDepth: 0,
+            depth: 0,
         }
     } else if tree.size == 1 {
         unique.Add(*tree.Value)
         ch<- nTreeInfo{
             maxChild: 0,
             uniqueValues: nil,
-            maxDepth: 1,
+            depth: 1,
         }
     } else {
 
         info := nTreeInfo{
             maxChild: len(tree.children),
             uniqueValues: nil,
-            maxDepth: 0,
+            depth: 0,
         }
 
         chChild := make(chan nTreeInfo)
@@ -364,14 +411,14 @@ func nTreeInfoHelper(tree *NTree, unique *uniqueCounter, ch chan nTreeInfo) {
             if chInfo.maxChild > info.maxChild {
                 info.maxChild = chInfo.maxChild
             }
-            if chInfo.maxDepth > info.maxDepth {
-                info.maxDepth = chInfo.maxDepth
+            if chInfo.depth > info.depth {
+                info.depth = chInfo.depth
             }
         }
         close(chChild)
 
         unique.Add(*tree.Value)
-        info.maxDepth++
+        info.depth++
 
         ch<- info
 
@@ -391,12 +438,12 @@ func (tree *BSTree) getInfo() bsTreeInfo {
     info := bsTreeInfo{
         avgNChild: nil,
         uniqueValues: unique.toArray(),
-        maxDepth: <-ch,
+        depth: <-ch,
     }
 
     // size of current tree divided by the maximum size possible for a root
     // with this depth
-    info.avgNChild = float64(tree.size) / (math.Pow(2, float64(info.maxDepth)) - 1)
+    info.avgNChild = float64(tree.size) / (math.Pow(2, float64(info.depth)) - 1)
 
     return info
 }
@@ -435,18 +482,18 @@ func bsTreeInfoHelper(tree *BSTree, unique *uniqueCounter, ch chan int) {
 // These imply that trees are also parameters for generating resampled 
 // versions of themselves
 
-func (params *NTreeGenParams) Generate(maxDepth int) Tree {
+func (params *NTreeGenParams) Generate(depth int) Tree {
     /* NTreeGenParams
     r *Rand
     MaxChild int
     PossibleValues []int
     */
     ch := make(chan *NTree)
-    go nTreeGenHelper(params, maxDepth, ch)
+    go nTreeGenHelper(params, depth, ch)
     return <-ch
 }
 
-func nTreeGenHelper(params *NTreeGenParams, maxDepth int, ch chan *NTree) {
+func nTreeGenHelper(params *NTreeGenParams, depth int, ch chan *NTree) {
 
     tree := &NTree{
         Value:nil,
@@ -458,13 +505,13 @@ func nTreeGenHelper(params *NTreeGenParams, maxDepth int, ch chan *NTree) {
         ch<- tree
     }(tree, ch)
 
-    if maxDepth >= 1 {
+    if depth >= 1 {
         tree.Value = &params.PossibleValues[params.r.Intn(len(params.PossibleValues))]
         var children []*NTree
         tree.children = children
         tree.size = 1
     }
-    if maxDepth > 1 {
+    if depth > 1 {
 
         nChild := params.r.Intn(params.MaxChild)
 
@@ -472,7 +519,7 @@ func nTreeGenHelper(params *NTreeGenParams, maxDepth int, ch chan *NTree) {
         defer close(chChild)
 
         for i := 0; i < nChild; i++ {
-            go nTreeGenHelper(params, maxDepth-1, chChild)
+            go nTreeGenHelper(params, depth-1, chChild)
         }
 
         for i := 0; i < nChild; i++ {
@@ -493,18 +540,18 @@ func (tree *NTree) GetParams() NTreeGenParams {
     }
 }
 
-func (params *BSTreeGenParams) Generate(maxDepth int) Tree {
+func (params *BSTreeGenParams) Generate(depth int) Tree {
     /*
     r *Rand
     ChildProb float64
     PossibleValues []int
     */
     ch := make(chan *BSTree)
-    go bsTreeGenHelper(params, maxDepth, ch)
+    go bsTreeGenHelper(params, depth, ch)
     return <-ch
 }
 
-func bsTreeGenHelper(params *BSTreeGenParams, maxDepth int, ch chan *BSTree) {
+func bsTreeGenHelper(params *BSTreeGenParams, depth int, ch chan *BSTree) {
 
         tree := &BSTree{
             Value:nil,
@@ -518,23 +565,23 @@ func bsTreeGenHelper(params *BSTreeGenParams, maxDepth int, ch chan *BSTree) {
             close(ch)
         }(tree, ch)
 
-        if maxDepth >= 1 {
+        if depth >= 1 {
             tree.Value = &params.PossibleValues[params.r.Intn(len(params.PossibleValues))]
             tree.size = 1
         }
-        if maxDepth > 1 {
+        if depth > 1 {
 
             chRight := make(chan *BSTree)
             chLeft := make(chan *BSTree)
 
             if params.r.Float64() < params.ChildProb {
-                go bsTreeGenHelper(params, maxDepth-1, chRight)
+                go bsTreeGenHelper(params, depth-1, chRight)
             } else {
                 go bsTreeGenHelper(params, 0, chRight)
             }
 
             if params.r.Float64() < params.ChildProb {
-                go bsTreeGenHelper(params, maxDepth-1, chLeft)
+                go bsTreeGenHelper(params, depth-1, chLeft)
             } else {
                 go bsTreeGenHelper(params, 0, chLeft)
             }
