@@ -7,11 +7,10 @@ import = (
 }
 
 type LinkedList interface {
-	Traverse() <-chan *int
-	ToArray() []*int
+	Iter() <-chan *int
 	Get(int) (*int, error)
         Append(int) error
-	Delete(int) (*int, error)
+	Remove(int) (*int, error)
 	Split(int, int) (LinkedList, error)
 }
 
@@ -28,18 +27,18 @@ type DoubleLinkedList struct {
 	prev *DoubleLinkedList
 }
 
-// Traverse() <-chan int
+// Iter() <-chan int
 
-func (root *SingleLinkedList) Traverse() <-chan *int {
+func (root *SingleLinkedList) Iter() <-chan *int {
 
     ch = make(chan *int)
 
-    go sLLTraverseHelper(root, ch)
+    go sLLIterHelper(root, ch)
     return ch
 
 }
 
-func (root *DoubleLinkedList) Traverse() <-chan *int {
+func (root *DoubleLinkedList) Iter() <-chan *int {
 
     chLeft = make(chan *int)
     chRight = make(chan *int)
@@ -47,10 +46,10 @@ func (root *DoubleLinkedList) Traverse() <-chan *int {
     var after int
     if root.prev != nil {
         after = root.Value
-        go dLLLeftTraverseHelper(root.prev, root, chLeft)
+        go dLLLeftIterHelper(root.prev, root, chLeft)
     }
 
-    go dLLRightTraverseHelper(root, chRight, chLeft)
+    go dLLRightIterHelper(root, chRight, chLeft)
     return chRight
 
 }
@@ -60,8 +59,8 @@ func (root *DoubleLinkedList) Traverse() <-chan *int {
 func (root *SingleLinkedList) ToArray() {
 
     var ret []*int
-    for val := range root.Traverse() {
-        append(ret, val)
+    for val := range root.Iter() {
+        ret = append(ret, val)
     }
 
     return ret
@@ -71,8 +70,8 @@ func (root *SingleLinkedList) ToArray() {
 func (root *DoubleLinkedList) ToArray() {
 
     var ret []*int
-    for val := range root.Traverse() {
-        append(ret, val)
+    for val := range root.Iter() {
+        ret = append(ret, val)
     }
 
     return ret
@@ -95,9 +94,9 @@ func (root *DoubleLinkedList) Get(i int) (*int, error) {
 
 }
 
-// Delete(int) *int
+// Remove(int) *int
 
-func (root *SingleLinkedList) Delete(int) (*int, error) {
+func (root *SingleLinkedList) Remove(int) (*int, error) {
 
     if node, err := root.getNode(i-1); err {
         return nil, err
@@ -113,7 +112,7 @@ func (root *SingleLinkedList) Delete(int) (*int, error) {
 
 }
 
-func (root *SingleLinkedList) Delete(int) (*int, error) {
+func (root *SingleLinkedList) Remove(int) (*int, error) {
 
     if node, err := root.getNode(i); err {
         return nil, err
@@ -177,63 +176,147 @@ func (root *DoubleLinkedList) Split(i, j int) (LinkedList, error) {
 
 func (root *SingleLinkedList) Print() {
 
-    fmt.Printf("%d")
+    fmt.Printf("(%d)", root.Value)
 
     first := root
     curr := root.next
 
-    for ;curr != nil || curr != first; curr := curr.next {
-        fmt.Printf("-> %d ")
+    for ;curr != nil || curr != first; curr = curr.next {
+        fmt.Printf("->(%d)", curr.Value)
     }
 
     if curr == first {
-        fmt.Printf("-> (loop)")
+        fmt.Printf("->(LOOP)")
+    } else {
+        fmt.Printf("->(END)")
     }
 
 }
 
 func (root *DoubleLinkedList) Print() {
 
-    fmt.Printf("%d")
+    leftNode := root
+    rightNode := root
 
-    left := root.prev
-    right := root.next
+    leftWing := LIFO{}
+    rightWing := FIFO{}
 
-    for ; left != nil || right != nil || left != right; {
-        
-        // TODO fix for loops
+    end := "END"
 
+    for ;; {
+
+        if leftNode.prev == rightNode {
+            end = "LOOP"
+            break
+        } else if leftNode.prev != nil {
+            leftNode := leftNode.prev
+            leftWing.Push(leftNode.Value)
+        }
+
+        if rightNode.next == leftNode {
+            loop = true
+            break
+        } else if rightNode.next != nil {
+            rightNode := rightNode.next
+            rightWing.Push(rightNode.Value
+        }
+
+        if leftNode.prev == nil && rightNode.next == nil {
+            break
+        }
+
+    }
+
+    fmt.Print("(%s)", end)
+
+    for ; !leftWing.IsEmpty(); {
+        fmt.Printf("<-(%d)", leftWing.Pop())
+    }
+
+    fmt.Printf("<-(%d)->", root.Value)
+
+    for ; !rightWing.IsEmpty(); {
+        fmt.Printf("(%d)->", rightWing.Pop())
+    }
+
+    fmt.Print("(%s)", end)
+
+}
+
+// Len() int
+
+func (root *SingleLinkedList) Len() int {
+
+    curr := root
+    counter := int(root.Value =! nil)
+
+    for ; curr.next != nil || curr.next != root; curr = curr.next {
+        counter++
+    }
+
+    if curr.next == root {
+        return -1
+    else {
+        return counter
     }
 
 }
 
-// Len()
+func (root *DoubleLinkedList) Len() int {
 
-// various functions
+    leftNode := root
+    rightNode := root
+    counter := int(root.Value =! nil)
 
-func IsLoop(root LinkedList) bool {}
+    for ;; {
+
+        if leftNode.prev == rightNode {
+            break
+        } else if leftNode.prev != nil {
+            counter++
+        }
+
+        if rightNode.next == leftNode {
+            break
+        } else if rightNode.next != nil {
+            counter++
+        }
+
+        if leftNode.prev == nil && rightNode.next == nil {
+            break
+        }
+
+    }
+
+    if leftNode.prev == rightNode || rightNode.next == leftNode {
+        return -1
+    } else {
+        return counter
+    }
+
+}
 
 // helper functions
 
-func sLLTraverseHelper(node *SingleLinkedList, ch chan *int) {
+func sLLIterHelper(node *SingleLinkedList, ch chan *int) {
 
     // if list is looped, traversal will continue yielding forever
     if node.Value != nil {
         ch<- node.Value
-        sLLTraverseHelper(node.next, ch)
+        sLLIterHelper(node.next, ch)
     } else {
         close(ch<-)
     }
 
 }
 
-func dLLLeftTraverseHelper(node, first *DoubleLinkedList, ch chan *int) {
+func dLLLeftIterHelper(node, first *DoubleLinkedList, ch chan *int) {
 
     // if node is looped, chanel is closed and infinite generator is passed 
-    // onto dLLRightTraverseHelper
+    // onto dLLRightIterHelper
     if node.Value != nil || node != first {
         if node.prev != nil {
-            dLLLeftTraverseHelper(node.prev, ch)
+            dLLLeftIterHelper(node.prev, ch)
         }
         ch<- node.Value
     } else {
@@ -242,7 +325,7 @@ func dLLLeftTraverseHelper(node, first *DoubleLinkedList, ch chan *int) {
 
 }
 
-func dLLRightTraverseHelper(node *DoubleLinkedList, ch, chLeft chan *int) {
+func dLLRightIterHelper(node *DoubleLinkedList, ch, chLeft chan *int) {
 
     for val := range chLeft {
         ch<- val
@@ -251,7 +334,7 @@ func dLLRightTraverseHelper(node *DoubleLinkedList, ch, chLeft chan *int) {
     if node.Value != nil {
         ch<- node.Value
         if node.next != nil {
-            dLLRightTraverseHelper(node.next, ch)
+            dLLRightIterHelper(node.next, ch)
         }
     } else {
         close(ch<-)
